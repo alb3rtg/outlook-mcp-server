@@ -6,7 +6,11 @@ through OAuth 2.0 using FastAPI.
 """
 
 import json
+import os
+import stat
 import time
+import secrets
+import html
 from typing import Dict, Optional
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -15,6 +19,45 @@ import urllib.parse
 
 from config import settings
 from logger import logger
+
+# Token file permissions (owner read/write only)
+TOKEN_FILE_MODE = stat.S_IRUSR | stat.S_IWUSR  # 0o600
+
+# Store for CSRF state tokens (in production, use Redis or similar)
+# Maps state token -> timestamp for cleanup
+_state_tokens: Dict[str, float] = {}
+STATE_TOKEN_EXPIRY = 600  # 10 minutes
+
+
+def generate_state_token() -> str:
+    """Generate a cryptographically secure state token for CSRF protection"""
+    # Clean up expired tokens
+    current_time = time.time()
+    expired = [k for k, v in _state_tokens.items() if current_time - v > STATE_TOKEN_EXPIRY]
+    for k in expired:
+        del _state_tokens[k]
+
+    # Generate new token
+    token = secrets.token_urlsafe(32)
+    _state_tokens[token] = current_time
+    return token
+
+
+def validate_state_token(token: str) -> bool:
+    """Validate a state token and remove it (one-time use)"""
+    if token not in _state_tokens:
+        return False
+
+    timestamp = _state_tokens.pop(token)
+    if time.time() - timestamp > STATE_TOKEN_EXPIRY:
+        return False
+
+    return True
+
+
+def escape_html(text: str) -> str:
+    """Escape HTML special characters to prevent XSS"""
+    return html.escape(str(text)) if text else ""
 
 
 # Create FastAPI app
@@ -117,11 +160,15 @@ def exchange_code_for_tokens(code: str) -> Dict:
     # Calculate expiration time
     result["expires_at"] = int(time.time()) + result["expires_in"]
 
-    # Save tokens to file
-    with open(settings.MS_TOKEN_STORE_PATH, "w") as f:
+    # Save tokens to file with secure permissions
+    token_path = settings.MS_TOKEN_STORE_PATH
+    with open(token_path, "w") as f:
         json.dump(result, f, indent=2)
 
-    logger.info(f"Tokens saved to {settings.MS_TOKEN_STORE_PATH}")
+    # Set restrictive permissions (owner read/write only)
+    os.chmod(token_path, TOKEN_FILE_MODE)
+
+    logger.info(f"Tokens saved securely to {token_path}")
 
     return result
 
@@ -153,14 +200,15 @@ async def auth():
             status_code=500,
         )
 
-    # Build auth parameters exactly as in the original JavaScript code
+    # Build auth parameters with secure CSRF state token
+    state_token = generate_state_token()
     auth_params = {
         "client_id": settings.MS_CLIENT_ID,
         "response_type": "code",
         "redirect_uri": f"{settings.MS_AUTH_SERVER_URL}/auth/callback",
         "scope": " ".join(settings.MS_SCOPES),
         "response_mode": "query",
-        "state": str(int(time.time())),  # Simple state parameter for security
+        "state": state_token,  # Cryptographically secure state for CSRF protection
     }
 
     # Construct auth URL exactly as in the original JavaScript code
@@ -174,18 +222,33 @@ async def auth():
 @app.get("/auth/callback", response_class=HTMLResponse)
 async def auth_callback(
     code: Optional[str] = None,
+    state: Optional[str] = None,
     error: Optional[str] = None,
     error_description: Optional[str] = None,
 ):
-    """Handle authentication callback"""
+    """Handle authentication callback with CSRF validation"""
+    # Validate CSRF state token
+    if state and not validate_state_token(state):
+        logger.error("Invalid or expired state token - possible CSRF attack")
+        return HTMLResponse(
+            TEMPLATES["error"].format(
+                title="Security Error",
+                content="<p>Invalid or expired security token. Please try authenticating again.</p>",
+            ),
+            status_code=403,
+        )
+
     if error:
         logger.error(f"Authentication error: {error} - {error_description}")
+        # Escape error messages to prevent XSS
+        safe_error = escape_html(error)
+        safe_description = escape_html(error_description) if error_description else 'No description provided'
         return HTMLResponse(
             TEMPLATES["error"].format(
                 title="Authentication Error",
                 content=f"""
-                    <p><strong>Error:</strong> {error}</p>
-                    <p><strong>Description:</strong> {error_description or 'No description provided'}</p>
+                    <p><strong>Error:</strong> {safe_error}</p>
+                    <p><strong>Description:</strong> {safe_description}</p>
                 """,
             ),
             status_code=400,
@@ -206,11 +269,13 @@ async def auth_callback(
         tokens = exchange_code_for_tokens(code)
         logger.info("Token exchange successful")
         return TEMPLATES["success"]
-    except Exception as error:
-        logger.error(f"Token exchange error: {str(error)}")
+    except Exception as err:
+        logger.error(f"Token exchange error: {str(err)}")
+        # Escape error message to prevent XSS
+        safe_error_msg = escape_html(str(err))
         return HTMLResponse(
             TEMPLATES["error"].format(
-                title="Token Exchange Error", content=f"<p>{str(error)}</p>"
+                title="Token Exchange Error", content=f"<p>{safe_error_msg}</p>"
             ),
             status_code=500,
         )

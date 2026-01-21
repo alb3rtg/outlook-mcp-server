@@ -7,10 +7,22 @@ from auth import ensure_authenticated
 from server import mcp
 
 
+import re
+
+# Simple email validation regex
+EMAIL_REGEX = re.compile(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$")
+
+
+def validate_email(email: str) -> bool:
+    """Validate email address format"""
+    return bool(EMAIL_REGEX.match(email.strip()))
+
+
 @mcp.tool()
 async def handle_send_email(
     to: str = "",
     cc: str = "",
+    bcc: str = "",
     subject: str = "",
     body: str = "",
     importance: str = "normal",
@@ -22,6 +34,7 @@ async def handle_send_email(
     Args:
         to: Primary recipient email addresses (comma-separated for multiple recipients)
         cc: Carbon copy recipient email addresses (comma-separated for multiple recipients)
+        bcc: Blind carbon copy recipient email addresses (comma-separated for multiple recipients)
         subject: Email subject line
         body: Email body content (supports HTML formatting)
         importance: Email importance level ("low", "normal", or "high") (default: "normal")
@@ -40,6 +53,21 @@ async def handle_send_email(
 
     if not body:
         return "Body content is required."
+
+    # Validate email addresses
+    all_recipients = [e.strip() for e in to.split(",") if e.strip()]
+    if cc:
+        all_recipients.extend([e.strip() for e in cc.split(",") if e.strip()])
+    if bcc:
+        all_recipients.extend([e.strip() for e in bcc.split(",") if e.strip()])
+
+    invalid_emails = [e for e in all_recipients if not validate_email(e)]
+    if invalid_emails:
+        return f"Invalid email address(es): {', '.join(invalid_emails)}"
+
+    # Validate importance level
+    if importance not in ("low", "normal", "high"):
+        return "Importance must be 'low', 'normal', or 'high'."
 
     try:
         # Get access token
