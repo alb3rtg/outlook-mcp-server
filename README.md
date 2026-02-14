@@ -59,7 +59,7 @@ To use this MCP server you need to first register and configure an app in Azure 
 
 1. Open [Azure Portal](https://portal.azure.com/) in your browser
 2. Sign in with a Microsoft Work or Personal account
-3. Search for or cilck on "App registrations"
+3. Search for or click on "App registrations"
 4. Click on "New registration"
 5. Enter a name for the app, for example "Outlook MCP Server"
 6. Select the "Accounts in any organizational directory and personal Microsoft accounts" option
@@ -73,14 +73,13 @@ To use this MCP server you need to first register and configure an app in Azure 
 2. Click on "Add a permission"
 3. Click on "Microsoft Graph"
 4. Select "Delegated permissions"
-5. Search for the following permissions and slect the checkbox next to each one
+5. Search for the following permissions and select the checkbox next to each one
     - offline_access
     - User.Read
     - Mail.Read
     - Mail.Send
     - Calendars.Read
     - Calendars.ReadWrite
-    - Contacts.Read
 6. Click on "Add permissions"
 
 ### Client Secret
@@ -104,6 +103,26 @@ MS_AUTH_SERVER_URL=your-ms-auth-server-url
 
 2. Update the configuration in `config.py` as needed.
 
+## Running the Server
+
+Start the MCP server and authentication server:
+
+```bash
+cd ~/Projects/outlook-mcp-server
+source venv/bin/activate
+python main.py
+```
+
+The auth server runs on `http://localhost:3333`. On first use, authenticate via the `authenticate` tool, which opens Microsoft's login page in your browser.
+
+**Note:** This server uses the `/consumers/` OAuth endpoint, which supports personal Microsoft accounts only. For work/school accounts, the tenant endpoint would need to change.
+
+### Claude Code MCP Registration
+
+```bash
+claude mcp add outlook-mcp -- bash -c "cd ~/Projects/outlook-mcp-server && source venv/bin/activate && python main.py"
+```
+
 ## Usage with Claude Desktop
 
 1. Copy the sample configuration from `claude-config-sample.json` to your Claude Desktop configuration
@@ -114,7 +133,7 @@ MS_AUTH_SERVER_URL=your-ms-auth-server-url
 
 ## Authentication Flow
 
-1. Start a local authentication server on port 3333 (using `outlook-auth-server.js`)
+1. Start a local authentication server on port 3333 (using `outlook_auth_server.py`)
 2. Use the `authenticate` tool to get an authentication URL
 3. Complete the authentication in your browser
 4. Tokens are stored in `~/.outlook-mcp-tokens.json`

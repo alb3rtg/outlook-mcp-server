@@ -27,7 +27,6 @@ class Settings(BaseSettings):
         "Mail.Send",
         "Calendars.Read",
         "Calendars.ReadWrite",
-        "Contacts.Read",
     ]
     MS_TOKEN_STORE_PATH: str = str(Path.home() / ".outlook-mcp-tokens.json")
 

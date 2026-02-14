@@ -8,10 +8,6 @@ from utils.graph_api import call_graph_api
 
 logger = logging.getLogger(__name__)
 
-# Cache of folder information to reduce API calls
-# Format: { userId: { folderName: { id, path } } }
-folder_cache: Dict[str, Dict[str, Dict[str, str]]] = {}
-
 
 async def resolve_folder_path(access_token: str, folder_name: str) -> str:
     """

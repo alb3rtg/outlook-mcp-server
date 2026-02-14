@@ -138,7 +138,7 @@ def exchange_code_for_tokens(code: str) -> Dict:
     """Exchange authorization code for tokens"""
     import requests
 
-    token_url = "https://login.microsoftonline.com/common/oauth2/v2.0/token"
+    token_url = "https://login.microsoftonline.com/consumers/oauth2/v2.0/token"
     token_data = {
         "client_id": settings.MS_CLIENT_ID,
         "client_secret": settings.MS_CLIENT_SECRET,
@@ -212,7 +212,7 @@ async def auth():
     }
 
     # Construct auth URL exactly as in the original JavaScript code
-    auth_url = f"https://login.microsoftonline.com/common/oauth2/v2.0/authorize?{urllib.parse.urlencode(auth_params)}"
+    auth_url = f"https://login.microsoftonline.com/consumers/oauth2/v2.0/authorize?{urllib.parse.urlencode(auth_params)}"
     logger.info(f"Redirecting to: {auth_url}")
 
     # Redirect to Microsoft's login page

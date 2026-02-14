@@ -88,7 +88,7 @@ def refresh_access_token(refresh_token: str) -> Optional[Dict]:
         New token data or None if refresh failed
     """
     try:
-        token_url = "https://login.microsoftonline.com/common/oauth2/v2.0/token"
+        token_url = "https://login.microsoftonline.com/consumers/oauth2/v2.0/token"
         token_data = {
             "client_id": settings.MS_CLIENT_ID,
             "client_secret": settings.MS_CLIENT_SECRET,

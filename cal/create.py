@@ -2,7 +2,6 @@
 Create calendar event functionality
 """
 
-from datetime import datetime
 from utils.graph_api import call_graph_api
 from auth import ensure_authenticated
 from server import mcp
