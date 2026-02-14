@@ -82,6 +82,8 @@ async def call_graph_api(
                 response_data = await response.text()
 
                 if 200 <= response.status < 300:
+                    if not response_data:
+                        return {}
                     try:
                         return json.loads(response_data)
                     except json.JSONDecodeError as e:
