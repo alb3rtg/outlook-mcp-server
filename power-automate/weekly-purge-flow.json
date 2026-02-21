@@ -1,0 +1,160 @@
+{
+  "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "$connections": {
+      "defaultValue": {},
+      "type": "Object"
+    }
+  },
+  "triggers": {
+    "Recurrence": {
+      "type": "Recurrence",
+      "recurrence": {
+        "frequency": "Week",
+        "interval": 1,
+        "schedule": {
+          "weekDays": ["Sunday"],
+          "hours": ["3"],
+          "minutes": [0]
+        },
+        "timeZone": "Pacific Standard Time"
+      }
+    }
+  },
+  "actions": {
+    "Initialize_deletedCount": {
+      "type": "InitializeVariable",
+      "inputs": {
+        "variables": [
+          {
+            "name": "deletedCount",
+            "type": "integer",
+            "value": 0
+          }
+        ]
+      },
+      "runAfter": {}
+    },
+    "Initialize_deletedEmailsList": {
+      "type": "InitializeVariable",
+      "inputs": {
+        "variables": [
+          {
+            "name": "deletedEmailsList",
+            "type": "string",
+            "value": ""
+          }
+        ]
+      },
+      "runAfter": {
+        "Initialize_deletedCount": ["Succeeded"]
+      }
+    },
+    "Get_My_Profile": {
+      "type": "ApiConnection",
+      "inputs": {
+        "host": {
+          "connection": {
+            "name": "@parameters('$connections')['office365users']['connectionId']"
+          }
+        },
+        "method": "get",
+        "path": "/codeless/v1.0/me"
+      },
+      "runAfter": {
+        "Initialize_deletedEmailsList": ["Succeeded"]
+      }
+    },
+    "Get_Promotional_Emails": {
+      "type": "ApiConnection",
+      "inputs": {
+        "host": {
+          "connection": {
+            "name": "@parameters('$connections')['office365']['connectionId']"
+          }
+        },
+        "method": "get",
+        "path": "/v2/Mail",
+        "queries": {
+          "folderPath": "Promotional-ToDelete",
+          "top": 250,
+          "fetchOnlyUnread": false
+        }
+      },
+      "runAfter": {
+        "Get_My_Profile": ["Succeeded"]
+      }
+    },
+    "For_Each_Email": {
+      "type": "Foreach",
+      "foreach": "@body('Get_Promotional_Emails')?['value']",
+      "actions": {
+        "Append_To_Deleted_List": {
+          "type": "AppendToStringVariable",
+          "inputs": {
+            "name": "deletedEmailsList",
+            "value": "<tr><td style='padding: 8px; border: 1px solid #ddd;'>@{replace(replace(string(items('For_Each_Email')?['from']), '<', '&lt;'), '>', '&gt;')}</td><td style='padding: 8px; border: 1px solid #ddd;'>@{items('For_Each_Email')?['subject']}</td><td style='padding: 8px; border: 1px solid #ddd;'>@{formatDateTime(items('For_Each_Email')?['receivedDateTime'], 'yyyy-MM-dd HH:mm')}</td></tr>"
+          },
+          "runAfter": {}
+        },
+        "Delete_Email": {
+          "type": "ApiConnection",
+          "inputs": {
+            "host": {
+              "connection": {
+                "name": "@parameters('$connections')['office365']['connectionId']"
+              }
+            },
+            "method": "delete",
+            "path": "/v2/Mail/@{encodeURIComponent(items('For_Each_Email')?['id'])}"
+          },
+          "runAfter": {
+            "Append_To_Deleted_List": ["Succeeded"]
+          }
+        },
+        "Increment_Deleted_Counter": {
+          "type": "IncrementVariable",
+          "inputs": {
+            "name": "deletedCount",
+            "value": 1
+          },
+          "runAfter": {
+            "Delete_Email": ["Succeeded"]
+          }
+        }
+      },
+      "runAfter": {
+        "Get_Promotional_Emails": ["Succeeded"]
+      },
+      "runtimeConfiguration": {
+        "concurrency": {
+          "repetitions": 1
+        }
+      }
+    },
+    "Send_Report_Email": {
+      "type": "ApiConnection",
+      "inputs": {
+        "host": {
+          "connection": {
+            "name": "@parameters('$connections')['office365']['connectionId']"
+          }
+        },
+        "method": "post",
+        "path": "/v2/Mail",
+        "body": {
+          "subject": "Weekly Email Purge Report - @{formatDateTime(utcNow(), 'yyyy-MM-dd')} | @{variables('deletedCount')} deleted",
+          "body": "<html><head><style>body{font-family:Segoe UI,Arial,sans-serif;line-height:1.6;color:#333}h2{color:#0078d4}table{border-collapse:collapse;width:100%}th{background:#0078d4;color:#fff;padding:12px;text-align:left}td{padding:8px;border:1px solid #ddd}.summary-table td{padding:10px 15px}.summary-table tr:nth-child(odd){background:#f9f9f9}.deleted{color:#c00}.footer{color:#666;font-size:12px;margin-top:20px;padding-top:10px;border-top:1px solid #ddd}</style></head><body><h2>Weekly Promotional Email Purge Report</h2><p><strong>Run Date:</strong> @{formatDateTime(utcNow(), 'dddd, MMMM d, yyyy \\a\\t h:mm tt')} UTC</p><h3>Summary</h3><table class='summary-table' style='width:auto;'><tr><td><strong>Emails Deleted</strong></td><td class='deleted'><strong>@{variables('deletedCount')}</strong></td></tr></table>@{if(greater(variables('deletedCount'), 0), concat('<h3>Deleted Emails</h3><table><tr><th>From</th><th>Subject</th><th>Received</th></tr>', variables('deletedEmailsList'), '</table>'), '<p><em>No emails were in the Promotional-ToDelete folder.</em></p>')}<p class='footer'>This report was auto-generated by <strong>Power Automate Email Manager</strong>.<br/>All emails in the Promotional-ToDelete folder have been permanently deleted.<br/>Review the folder before each weekly purge to rescue any incorrectly flagged emails.</p></body></html>",
+          "importance": "Low",
+          "isHtml": true,
+          "toRecipients": "@{body('Get_My_Profile')?['mail']}"
+        }
+      },
+      "runAfter": {
+        "For_Each_Email": ["Succeeded"]
+      }
+    }
+  },
+  "outputs": {}
+}

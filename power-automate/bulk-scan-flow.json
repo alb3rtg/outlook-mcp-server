@@ -1,0 +1,196 @@
+{
+  "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "$connections": {
+      "defaultValue": {},
+      "type": "Object"
+    }
+  },
+  "triggers": {
+    "manual": {
+      "type": "Request",
+      "kind": "Button",
+      "inputs": {}
+    }
+  },
+  "actions": {
+    "Initialize_processedCount": {
+      "type": "InitializeVariable",
+      "inputs": {
+        "variables": [
+          {
+            "name": "processedCount",
+            "type": "integer",
+            "value": 0
+          }
+        ]
+      },
+      "runAfter": {}
+    },
+    "Initialize_movedCount": {
+      "type": "InitializeVariable",
+      "inputs": {
+        "variables": [
+          {
+            "name": "movedCount",
+            "type": "integer",
+            "value": 0
+          }
+        ]
+      },
+      "runAfter": {
+        "Initialize_processedCount": ["Succeeded"]
+      }
+    },
+    "Initialize_unsubscribedCount": {
+      "type": "InitializeVariable",
+      "inputs": {
+        "variables": [
+          {
+            "name": "unsubscribedCount",
+            "type": "integer",
+            "value": 0
+          }
+        ]
+      },
+      "runAfter": {
+        "Initialize_movedCount": ["Succeeded"]
+      }
+    },
+    "Initialize_movedEmailsList": {
+      "type": "InitializeVariable",
+      "inputs": {
+        "variables": [
+          {
+            "name": "movedEmailsList",
+            "type": "string",
+            "value": ""
+          }
+        ]
+      },
+      "runAfter": {
+        "Initialize_unsubscribedCount": ["Succeeded"]
+      }
+    },
+    "Get_My_Profile": {
+      "type": "ApiConnection",
+      "inputs": {
+        "host": {
+          "connection": {
+            "name": "@parameters('$connections')['office365users']['connectionId']"
+          }
+        },
+        "method": "get",
+        "path": "/codeless/v1.0/me"
+      },
+      "runAfter": {
+        "Initialize_movedEmailsList": ["Succeeded"]
+      }
+    },
+    "Search_Promotional_Emails": {
+      "type": "ApiConnection",
+      "inputs": {
+        "host": {
+          "connection": {
+            "name": "@parameters('$connections')['office365']['connectionId']"
+          }
+        },
+        "method": "get",
+        "path": "/v2/Mail",
+        "queries": {
+          "folderPath": "Inbox",
+          "searchQuery": "unsubscribe OR subject:offer OR subject:discount OR subject:sale OR subject:deal OR subject:\"limited time\" OR subject:\"act now\" OR subject:exclusive OR subject:free OR subject:promotion OR body:promotional OR body:\"marketing email\"",
+          "top": 250,
+          "fetchOnlyUnread": false
+        }
+      },
+      "runAfter": {
+        "Get_My_Profile": ["Succeeded"]
+      }
+    },
+    "For_Each_Email": {
+      "type": "Foreach",
+      "foreach": "@body('Search_Promotional_Emails')?['value']",
+      "actions": {
+        "Increment_Processed": {
+          "type": "IncrementVariable",
+          "inputs": {
+            "name": "processedCount",
+            "value": 1
+          },
+          "runAfter": {}
+        },
+        "Append_To_Moved_List": {
+          "type": "AppendToStringVariable",
+          "inputs": {
+            "name": "movedEmailsList",
+            "value": "<tr><td style='padding:5px;border:1px solid #ddd;'>@{replace(replace(string(items('For_Each_Email')?['from']), '<', '&lt;'), '>', '&gt;')}</td><td style='padding:5px;border:1px solid #ddd;'>@{items('For_Each_Email')?['subject']}</td><td style='padding:5px;border:1px solid #ddd;'>@{formatDateTime(items('For_Each_Email')?['receivedDateTime'], 'yyyy-MM-dd')}</td></tr>"
+          },
+          "runAfter": {
+            "Increment_Processed": ["Succeeded"]
+          }
+        },
+        "Move_To_Promotional": {
+          "type": "ApiConnection",
+          "inputs": {
+            "host": {
+              "connection": {
+                "name": "@parameters('$connections')['office365']['connectionId']"
+              }
+            },
+            "method": "post",
+            "path": "/v2/Mail/Move/@{encodeURIComponent(items('For_Each_Email')?['id'])}",
+            "body": {
+              "DestinationId": "Promotional-ToDelete"
+            }
+          },
+          "runAfter": {
+            "Append_To_Moved_List": ["Succeeded"]
+          }
+        },
+        "Increment_Moved": {
+          "type": "IncrementVariable",
+          "inputs": {
+            "name": "movedCount",
+            "value": 1
+          },
+          "runAfter": {
+            "Move_To_Promotional": ["Succeeded"]
+          }
+        }
+      },
+      "runAfter": {
+        "Search_Promotional_Emails": ["Succeeded"]
+      },
+      "runtimeConfiguration": {
+        "concurrency": {
+          "repetitions": 1
+        }
+      }
+    },
+    "Send_Report_Email": {
+      "type": "ApiConnection",
+      "inputs": {
+        "host": {
+          "connection": {
+            "name": "@parameters('$connections')['office365']['connectionId']"
+          }
+        },
+        "method": "post",
+        "path": "/v2/Mail",
+        "body": {
+          "subject": "Bulk Scan Complete - @{variables('movedCount')} promotional emails found",
+          "body": "<html><head><style>body{font-family:Segoe UI,Arial,sans-serif;line-height:1.6;color:#333}h2{color:#0078d4}table{border-collapse:collapse;width:100%}th{background:#0078d4;color:#fff;padding:8px;text-align:left}td{padding:5px;border:1px solid #ddd}.summary td{padding:10px}.footer{color:#666;font-size:12px;margin-top:20px}</style></head><body><h2>Bulk Promotional Email Scan Complete</h2><p><strong>Run Date:</strong> @{formatDateTime(utcNow(), 'yyyy-MM-dd HH:mm')} UTC</p><h3>Summary</h3><table class='summary' style='width:auto;'><tr><td><strong>Emails Scanned</strong></td><td>@{variables('processedCount')}</td></tr><tr><td><strong>Moved to Promotional-ToDelete</strong></td><td style='color:#c00;'><strong>@{variables('movedCount')}</strong></td></tr></table><p><strong>Note:</strong> This batch processed up to 250 emails. Run again to process more.</p>@{if(greater(variables('movedCount'), 0), concat('<h3>Moved Emails (showing up to 250)</h3><table><tr><th>From</th><th>Subject</th><th>Date</th></tr>', variables('movedEmailsList'), '</table>'), '<p>No promotional emails found in this batch.</p>')}<p class='footer'><strong>Next Steps:</strong><br/>1. Review the Promotional-ToDelete folder<br/>2. Rescue any false positives back to Inbox<br/>3. Run this flow again if you have more emails to scan<br/>4. Run the Weekly Purge to delete (or wait for Sunday 3am)</p></body></html>",
+          "importance": "Normal",
+          "isHtml": true,
+          "toRecipients": "@{body('Get_My_Profile')?['mail']}"
+        }
+      },
+      "runAfter": {
+        "For_Each_Email": ["Succeeded"]
+      }
+    }
+  },
+  "outputs": {}
+}

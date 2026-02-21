@@ -1,0 +1,299 @@
+{
+  "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "$connections": {
+      "defaultValue": {},
+      "type": "Object"
+    }
+  },
+  "triggers": {
+    "When_a_new_email_arrives_(V3)": {
+      "type": "ApiConnectionNotification",
+      "inputs": {
+        "fetch": {
+          "method": "get",
+          "pathTemplate": {
+            "template": "/v3/Mail/OnNewEmail"
+          },
+          "queries": {
+            "folderPath": "Inbox",
+            "importance": "Any",
+            "fetchOnlyWithAttachment": false,
+            "includeAttachments": false
+          }
+        },
+        "host": {
+          "connection": {
+            "name": "@parameters('$connections')['office365']['connectionId']"
+          }
+        },
+        "subscribe": {
+          "method": "post",
+          "pathTemplate": {
+            "template": "/v3/Mail/OnNewEmail"
+          },
+          "queries": {
+            "folderPath": "Inbox",
+            "importance": "Any",
+            "fetchOnlyWithAttachment": false
+          }
+        }
+      },
+      "splitOn": "@triggerBody()?['value']"
+    }
+  },
+  "actions": {
+    "Initialize_unsubscribeLink": {
+      "type": "InitializeVariable",
+      "inputs": {
+        "variables": [
+          {
+            "name": "unsubscribeLink",
+            "type": "string",
+            "value": ""
+          }
+        ]
+      },
+      "runAfter": {}
+    },
+    "Initialize_senderDomain": {
+      "type": "InitializeVariable",
+      "inputs": {
+        "variables": [
+          {
+            "name": "senderDomain",
+            "type": "string",
+            "value": ""
+          }
+        ]
+      },
+      "runAfter": {
+        "Initialize_unsubscribeLink": ["Succeeded"]
+      }
+    },
+    "Initialize_isPromotional": {
+      "type": "InitializeVariable",
+      "inputs": {
+        "variables": [
+          {
+            "name": "isPromotional",
+            "type": "boolean",
+            "value": false
+          }
+        ]
+      },
+      "runAfter": {
+        "Initialize_senderDomain": ["Succeeded"]
+      }
+    },
+    "Initialize_isSafeToUnsubscribe": {
+      "type": "InitializeVariable",
+      "inputs": {
+        "variables": [
+          {
+            "name": "isSafeToUnsubscribe",
+            "type": "boolean",
+            "value": false
+          }
+        ]
+      },
+      "runAfter": {
+        "Initialize_isPromotional": ["Succeeded"]
+      }
+    },
+    "Extract_Sender_Domain": {
+      "type": "Compose",
+      "inputs": "@if(contains(triggerBody()?['from'], '@'), last(split(triggerBody()?['from'], '@')), '')",
+      "runAfter": {
+        "Initialize_isSafeToUnsubscribe": ["Succeeded"]
+      }
+    },
+    "Set_Sender_Domain": {
+      "type": "SetVariable",
+      "inputs": {
+        "name": "senderDomain",
+        "value": "@{replace(replace(outputs('Extract_Sender_Domain'), '>', ''), ' ', '')}"
+      },
+      "runAfter": {
+        "Extract_Sender_Domain": ["Succeeded"]
+      }
+    },
+    "Check_If_Promotional": {
+      "type": "Compose",
+      "inputs": "@or(contains(toLower(triggerBody()?['body']), 'unsubscribe'), contains(toLower(triggerBody()?['subject']), 'offer'), contains(toLower(triggerBody()?['subject']), 'discount'), contains(toLower(triggerBody()?['subject']), 'sale'), contains(toLower(triggerBody()?['subject']), 'deal'), contains(toLower(triggerBody()?['subject']), 'limited time'), contains(toLower(triggerBody()?['subject']), 'act now'), contains(toLower(triggerBody()?['subject']), 'exclusive'), contains(toLower(triggerBody()?['subject']), 'free'), contains(toLower(triggerBody()?['subject']), 'promotion'), contains(toLower(triggerBody()?['body']), 'promotional'), contains(toLower(triggerBody()?['body']), 'marketing email'), contains(toLower(triggerBody()?['body']), 'email preferences'))",
+      "runAfter": {
+        "Set_Sender_Domain": ["Succeeded"]
+      }
+    },
+    "Set_isPromotional": {
+      "type": "SetVariable",
+      "inputs": {
+        "name": "isPromotional",
+        "value": "@outputs('Check_If_Promotional')"
+      },
+      "runAfter": {
+        "Check_If_Promotional": ["Succeeded"]
+      }
+    },
+    "Condition_Is_Promotional": {
+      "type": "If",
+      "expression": {
+        "and": [
+          {
+            "equals": ["@variables('isPromotional')", true]
+          }
+        ]
+      },
+      "actions": {
+        "Extract_Unsubscribe_Link": {
+          "type": "Compose",
+          "inputs": "@if(contains(toLower(triggerBody()?['body']), 'unsubscribe'), first(split(last(split(toLower(triggerBody()?['body']), 'href=\"')), '\"')), '')",
+          "runAfter": {}
+        },
+        "Find_HTTPS_Unsubscribe": {
+          "type": "Compose",
+          "inputs": "@if(or(startsWith(outputs('Extract_Unsubscribe_Link'), 'https://'), startsWith(outputs('Extract_Unsubscribe_Link'), 'http://')), outputs('Extract_Unsubscribe_Link'), '')",
+          "runAfter": {
+            "Extract_Unsubscribe_Link": ["Succeeded"]
+          }
+        },
+        "Set_Unsubscribe_Link": {
+          "type": "SetVariable",
+          "inputs": {
+            "name": "unsubscribeLink",
+            "value": "@{outputs('Find_HTTPS_Unsubscribe')}"
+          },
+          "runAfter": {
+            "Find_HTTPS_Unsubscribe": ["Succeeded"]
+          }
+        },
+        "Check_Link_Safety": {
+          "type": "Compose",
+          "inputs": "@and(startsWith(variables('unsubscribeLink'), 'https://'), not(contains(variables('unsubscribeLink'), 'bit.ly')), not(contains(variables('unsubscribeLink'), 'tinyurl')), not(contains(variables('unsubscribeLink'), 't.co/')), not(contains(variables('unsubscribeLink'), 'goo.gl')), not(contains(variables('unsubscribeLink'), 'shorturl')), not(contains(variables('unsubscribeLink'), 'tiny.cc')), not(contains(variables('unsubscribeLink'), 'is.gd')), not(contains(variables('unsubscribeLink'), 'buff.ly')), not(contains(variables('unsubscribeLink'), 'ow.ly')), not(contains(variables('unsubscribeLink'), 'rebrand.ly')), not(empty(variables('unsubscribeLink'))), greater(length(variables('unsubscribeLink')), 10))",
+          "runAfter": {
+            "Set_Unsubscribe_Link": ["Succeeded"]
+          }
+        },
+        "Check_Domain_Match": {
+          "type": "Compose",
+          "inputs": "@or(contains(variables('unsubscribeLink'), variables('senderDomain')), contains(variables('unsubscribeLink'), 'mailchimp.com'), contains(variables('unsubscribeLink'), 'sendgrid.net'), contains(variables('unsubscribeLink'), 'constantcontact.com'), contains(variables('unsubscribeLink'), 'hubspot.com'), contains(variables('unsubscribeLink'), 'salesforce.com'), contains(variables('unsubscribeLink'), 'amazonses.com'), contains(variables('unsubscribeLink'), 'mailgun.com'), contains(variables('unsubscribeLink'), 'sparkpost.com'), contains(variables('unsubscribeLink'), 'postmarkapp.com'), contains(variables('unsubscribeLink'), 'sendinblue.com'), contains(variables('unsubscribeLink'), 'klaviyo.com'), contains(variables('unsubscribeLink'), 'campaign-archive.com'), contains(variables('unsubscribeLink'), 'list-manage.com'), contains(variables('unsubscribeLink'), 'exacttarget.com'), contains(variables('unsubscribeLink'), 'mktomail.com'), contains(variables('unsubscribeLink'), 'pardot.com'), contains(variables('unsubscribeLink'), 'eloqua.com'), contains(variables('unsubscribeLink'), 'responsys.net'), contains(variables('unsubscribeLink'), 'blueshift.com'), contains(variables('unsubscribeLink'), 'braze.com'), contains(variables('unsubscribeLink'), 'iterable.com'), contains(variables('unsubscribeLink'), 'customer.io'), contains(variables('unsubscribeLink'), 'intercom.io'))",
+          "runAfter": {
+            "Check_Link_Safety": ["Succeeded"]
+          }
+        },
+        "Set_Safety_Flag": {
+          "type": "SetVariable",
+          "inputs": {
+            "name": "isSafeToUnsubscribe",
+            "value": "@and(outputs('Check_Link_Safety'), outputs('Check_Domain_Match'))"
+          },
+          "runAfter": {
+            "Check_Domain_Match": ["Succeeded"]
+          }
+        },
+        "Condition_Safe_To_Unsubscribe": {
+          "type": "If",
+          "expression": {
+            "and": [
+              {
+                "equals": ["@variables('isSafeToUnsubscribe')", true]
+              }
+            ]
+          },
+          "actions": {
+            "HTTP_Unsubscribe": {
+              "type": "Http",
+              "inputs": {
+                "method": "GET",
+                "uri": "@variables('unsubscribeLink')",
+                "headers": {
+                  "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
+                }
+              },
+              "runAfter": {},
+              "runtimeConfiguration": {
+                "contentTransfer": {
+                  "transferMode": "Chunked"
+                }
+              }
+            },
+            "Log_Unsubscribe_Success": {
+              "type": "Compose",
+              "inputs": {
+                "action": "unsubscribed",
+                "email": "@triggerBody()?['from']",
+                "link": "@variables('unsubscribeLink')",
+                "timestamp": "@utcNow()"
+              },
+              "runAfter": {
+                "HTTP_Unsubscribe": ["Succeeded", "Failed"]
+              }
+            }
+          },
+          "else": {
+            "actions": {
+              "Log_Unsafe_Link": {
+                "type": "Compose",
+                "inputs": {
+                  "action": "skipped_unsubscribe",
+                  "reason": "Link did not pass safety check",
+                  "email": "@triggerBody()?['from']",
+                  "link": "@variables('unsubscribeLink')",
+                  "timestamp": "@utcNow()"
+                },
+                "runAfter": {}
+              }
+            }
+          },
+          "runAfter": {
+            "Set_Safety_Flag": ["Succeeded"]
+          }
+        },
+        "Move_to_Promotional_Folder": {
+          "type": "ApiConnection",
+          "inputs": {
+            "host": {
+              "connection": {
+                "name": "@parameters('$connections')['office365']['connectionId']"
+              }
+            },
+            "method": "post",
+            "path": "/v2/Mail/Move/@{encodeURIComponent(triggerBody()?['id'])}",
+            "body": {
+              "destinationFolder": "Promotional-ToDelete"
+            }
+          },
+          "runAfter": {
+            "Condition_Safe_To_Unsubscribe": ["Succeeded", "Failed", "Skipped"]
+          }
+        },
+        "Mark_as_Read": {
+          "type": "ApiConnection",
+          "inputs": {
+            "host": {
+              "connection": {
+                "name": "@parameters('$connections')['office365']['connectionId']"
+              }
+            },
+            "method": "patch",
+            "path": "/v2/Mail/@{encodeURIComponent(triggerBody()?['id'])}",
+            "body": {
+              "isRead": true
+            }
+          },
+          "runAfter": {
+            "Move_to_Promotional_Folder": ["Succeeded"]
+          }
+        }
+      },
+      "else": {
+        "actions": {}
+      },
+      "runAfter": {
+        "Set_isPromotional": ["Succeeded"]
+      }
+    }
+  },
+  "outputs": {}
+}
