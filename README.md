@@ -108,7 +108,7 @@ MS_AUTH_SERVER_URL=your-ms-auth-server-url
 Start the MCP server and authentication server:
 
 ```bash
-cd ~/Projects/outlook-mcp-server
+cd ~/projects/outlook-mcp-server
 source venv/bin/activate
 python main.py
 ```
@@ -120,7 +120,7 @@ The auth server runs on `http://localhost:3333`. On first use, authenticate via 
 ### Claude Code MCP Registration
 
 ```bash
-claude mcp add outlook-mcp -- bash -c "cd ~/Projects/outlook-mcp-server && source venv/bin/activate && python main.py"
+claude mcp add outlook-mcp -- bash -c "cd ~/projects/outlook-mcp-server && source venv/bin/activate && python main.py"
 ```
 
 ## Usage with Claude Desktop
